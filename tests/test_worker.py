@@ -82,6 +82,27 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await Worker(self.store,agent).tick(self.group),1)
         self.assertEqual(self.store.pending_replies(),[])
 
+    async def test_short_bot_thanks_does_not_trigger_reply_or_slow_ack(self):
+        self.store.ingest(message(sender_type='bot',sender_id='cli_peer',mentions=[{'id':'ou_self'}],
+                                  content='@_user_1 收到，谢谢。'))
+        self.store.reserve_messages(['om_one'])
+        await asyncio.sleep(.005)
+        worker = Worker(self.store,Agent([{'message_id':'om_one','kind':'reply','text':'我也收到！'}]))
+        self.assertEqual(worker.acknowledge_due(),0)
+        self.store.db.execute("UPDATE messages SET read_state='pending'")
+        self.store.db.commit()
+        await worker.tick(self.group)
+        self.assertEqual(self.store.pending_replies(),[])
+
+    async def test_waiting_job_gets_truthful_queue_feedback_without_starting_inference(self):
+        self.store.ingest(message(mentions=[{'id':'ou_self'}]))
+        await asyncio.sleep(.005)
+        worker = Worker(self.store,Agent())
+        self.assertEqual(worker.acknowledge_due(),1)
+        self.assertIn('队列',self.store.pending_replies()[0]['body'])
+        self.assertNotIn('正在阅读',self.store.pending_replies()[0]['body'])
+        self.assertEqual(self.store.get_message('om_one')['read_state'],'pending')
+
     async def test_unknown_source_and_injected_mention_rejected(self):
         self.store.ingest(message(mentions=[{'id':'ou_self'}]))
         for action in ({'message_id':'om_private','kind':'reply','text':'secret'},

@@ -105,13 +105,14 @@ class Store:
             self.db.execute('INSERT OR IGNORE INTO versions VALUES (?,?,?)',(mid,updated,payload))
             self.db.execute('''INSERT INTO messages
               (message_id,chat_id,sender_id,sender_type,created_ms,update_ms,content,kind,addressed,
-               own,root_id,parent_id,payload,read_state,received_ms)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO UPDATE SET
+               own,root_id,parent_id,payload,read_state,received_ms,ack_due_ms)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO UPDATE SET
               update_ms=excluded.update_ms,content=excluded.content,payload=excluded.payload,
               kind=excluded.kind,addressed=excluded.addressed,read_state=excluded.read_state,
-              read_offset=0,last_error=NULL,attempts=0,next_attempt_ms=0,ack_due_ms=NULL''',
+              read_offset=0,last_error=NULL,attempts=0,next_attempt_ms=0,ack_due_ms=excluded.ack_due_ms''',
               (mid,group.chat_id,sender,event['sender_type'],created,updated,event['content'],kind,
-               int(addressed),int(own),event.get('root_id'),parent,payload,state,now_ms()))
+               int(addressed),int(own),event.get('root_id'),parent,payload,state,now_ms(),
+               now_ms()+int(self.config.ack_seconds*1000) if addressed and not own else None))
         return True
 
     def get_message(self,mid):
@@ -129,7 +130,7 @@ class Store:
     def reserve_messages(self,ids):
         with self.db:
             for mid in ids:
-                self.db.execute("UPDATE messages SET read_state='reading',ack_due_ms=? WHERE message_id=? AND read_state='pending'",
+                self.db.execute("UPDATE messages SET read_state='reading',ack_due_ms=COALESCE(ack_due_ms,?) WHERE message_id=? AND read_state='pending'",
                                 (now_ms()+int(self.config.ack_seconds*1000),mid))
 
     def mark_read(self,ids,*,versions=None,offsets=None):

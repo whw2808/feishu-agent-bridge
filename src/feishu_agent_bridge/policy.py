@@ -3,7 +3,11 @@ import re
 
 
 def closure(text):
-    return bool(re.search(r'无需.{0,12}(?:回复|确认)|测试.{0,12}(?:收口|结束)|no (?:reply|further confirmation) (?:needed|required)',text,re.I))
+    if re.search(r'无需.{0,12}(?:回复|确认)|测试.{0,12}(?:收口|结束)|no (?:reply|further confirmation) (?:needed|required)',text,re.I):
+        return True
+    plain = re.sub(r'@_user_\d+|<at\b[^>]*>.*?</at>', '', text, flags=re.I)
+    plain = re.sub(r'[\s，。,.!！;；:：]+', '', plain).lower()
+    return bool(re.fullmatch(r'(?:已收到|收到|谢谢|感谢|thanks|thankyou|acknowledged|received|gotit|okay|ok)+',plain))
 
 
 def valid_action(action,source,chunk):

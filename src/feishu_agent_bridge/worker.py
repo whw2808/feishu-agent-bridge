@@ -81,14 +81,16 @@ class Worker:
 
     def acknowledge_due(self):
         count = 0
-        rows = self.store.db.execute("SELECT * FROM messages WHERE addressed=1 AND own=0 AND read_state='reading' AND ack_due_ms<=?",(now_ms(),)).fetchall()
+        rows = self.store.db.execute("SELECT * FROM messages WHERE addressed=1 AND own=0 AND read_state IN ('reading','pending') AND ack_due_ms<=?",(now_ms(),)).fetchall()
         for row in rows:
             if closure(row['content']):
                 continue
             mid = row['message_id']
             before = self.store.db.execute("SELECT 1 FROM replies WHERE message_id=? AND version=? AND kind='ack'",(mid,row['update_ms'])).fetchone()
             if not before:
-                self.store.enqueue_reply(mid,'ack','消息已收到，后台正在阅读并核对上下文；当前开发对话继续运行。',[])
+                text = ('消息已收到，后台正在阅读并核对上下文；当前开发对话继续运行。' if row['read_state']=='reading' else
+                        '消息已收到并进入后台队列，尚未开始阅读；当前开发对话继续运行。')
+                self.store.enqueue_reply(mid,'ack',text,[])
                 count += 1
         return count
 

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "feishu-agent-bridge",
+  "version": "0.1.0",
+  "description": "Read and respond to Feishu collaboration independently of your primary coding conversation",
+  "license": "MIT",
+  "extensions": {"com.openai": {"interface": {"displayName": "Feishu Agent Bridge", "shortDescription": "Background group reading and collaboration inbox"}}}
+}
