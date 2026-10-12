@@ -92,7 +92,8 @@ class Lark:
     async def original(self,mid,chat_id):
         data = await self.call(['api','GET','/open-apis/im/v1/messages/'+mid,'--as','user'])
         items = data.get('items',[])
-        if len(items)!=1 or items[0].get('chat_id') != chat_id or not self.config.group(chat_id) or items[0].get('deleted'):
+        if (len(items)!=1 or items[0].get('message_id')!=mid or items[0].get('chat_id') != chat_id
+            or not self.config.group(chat_id) or items[0].get('deleted')):
             raise TransportError('original message is unavailable or outside configured group')
         return items[0]
 

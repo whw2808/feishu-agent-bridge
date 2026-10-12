@@ -31,40 +31,40 @@
 
 **Files:** src/feishu_agent_bridge/config.py, models.py, store.py; tests/test_state.py.
 **Interfaces:** Config.load(path), Message.from_event/from_history, Store.ingest(message), pending_messages(group,limit), mark_read(ids), enqueue_reply(...), tasks()/claim_task()/complete_task().
-- [ ] Write failing behavior tests for configured scope, ordinary-message collection, real mention, own identity, duplicates/edits, interrupted reads/sends and cross-identity database reuse.
-- [ ] Run unittest tests.test_state; verify assertions fail on stub behavior, not import failure.
-- [ ] Implement private config validation and transactional SQLite state.
-- [ ] Run whole suite; record structured result and commit.
+- [x] Write failing behavior tests for configured scope, ordinary-message collection, real mention, own identity, duplicates/edits, interrupted reads/sends and cross-identity database reuse.
+- [x] Run unittest tests.test_state; verify assertions fail on stub behavior, not import failure.
+- [x] Implement private config validation and transactional SQLite state.
+- [x] Run whole suite; record structured result and commit.
 
 ## Task 2: Feishu collection and external delivery
 
 **Files:** adapters/lark.py, collector.py, delivery.py; tests/test_transport.py.
 **Interfaces:** async Lark.call(args)/history(group,scan)/events(queue)/reply(...); Collector.scan_group(); Sender.dispatch(); independent tasks consume Store from Task 1.
-- [ ] Write RED tests for multi-page normal messages, timeout/expired token, safe argv, correct true mention resolution, own-process termination and ambiguous send recovery.
-- [ ] Implement incremental cursors, async process wrapper and deterministic sender. Use native lark binary and bounded timeouts.
-- [ ] Run suite, ledger results and commit.
+- [x] Write RED tests for multi-page normal messages, timeout/expired token, safe argv, correct true mention resolution, own-process termination and ambiguous send recovery.
+- [x] Implement incremental cursors, async process wrapper and deterministic sender. Use native lark binary and bounded timeouts.
+- [x] Run suite, ledger results and commit.
 
 ## Task 3: Background worker and handoff
 
 **Files:** adapters/codex.py, worker.py, policy.py, runtime.py; tests/test_worker.py.
 **Interfaces:** async Agent.read(messages,summary,brief)->Decision; Worker.tick(); Runtime.run(); optional PrimaryQueue.deliver(task); Store jobs/replies/tasks remain authoritative.
-- [ ] Write RED tests proving blocked inference leaves collector active, normal messages never send by default, addressable requests reply or become inbox tasks, acknowledgements occur once, hostile decisions are rejected and bot closure stops loops.
-- [ ] Implement independent SDK thread, structured validation, budgets, safe acknowledgement, bounded message batching and primary-task lifecycle.
-- [ ] Run suite; record evidence and commit.
+- [x] Write RED tests proving blocked inference leaves collector active, normal messages never send by default, addressable requests reply or become inbox tasks, acknowledgements occur once, hostile decisions are rejected and bot closure stops loops.
+- [x] Implement independent SDK thread, structured validation, budgets, safe acknowledgement, bounded message batching and primary-task lifecycle.
+- [x] Run suite; record evidence and commit.
 
 ## Task 4: Installable CLI, MCP and plugin
 
 **Files:** cli.py, mcp_server.py, service.py, pyproject.toml, plugin.json, mcp.json, skills/*/SKILL.md, .agents/plugins/marketplace.json, README.md, docs/, LICENSE, .github/workflows/ci.yml; tests/test_cli.py.
 **Interfaces:** feishu-agent setup/run/start/stop/status/doctor/inbox/complete/bind/mcp; MCP status, summaries, pending_tasks, claim_task, complete_task, bind_session.
-- [ ] Write failing subprocess/MCP tests for installation, absent optional dependencies, stdin protocol, configuration privacy, portable manifests, task completion idempotency and service scope.
-- [ ] Implement CLI/service/MCP, author narrowly scoped skills and bilingual release documentation.
-- [ ] Build wheel/sdist and plugin archive; install in clean venv and smoke-test; run suite/lint; commit.
+- [x] Write failing subprocess/MCP tests for installation, absent optional dependencies, stdin protocol, configuration privacy, portable manifests, task completion idempotency and service scope.
+- [x] Implement CLI/service/MCP, author narrowly scoped skills and bilingual release documentation.
+- [x] Build wheel/sdist and plugin archive; install in clean venv and smoke-test; run suite/lint; commit.
 
 ## Task 5: Review and real acceptance
 
 **Files:** docs/validation.md and ignored .artifacts/ reports only; runtime files outside repository.
-- [ ] Validate independently with a fresh code reviewer; fix Important findings with RED->GREEN tests.
-- [ ] Verify actual Feishu history/events and a separate Codex worker without writing project files or queuing routine messages to primary.
-- [ ] Cut over only this user's old bridge after acceptance; preserve its baseline/processed receipts and rollback command.
-- [ ] Verify service shutdown/restart and plugin/MCP installed in a new session; record exact local platform evidence and limits.
-- [ ] Commit clean delivery and provide source/install/validation paths. No public publication claim.
+- [x] Validate independently with a fresh code reviewer; fix Important findings with RED->GREEN tests.
+- [x] Verify actual Feishu history/events and a separate Codex worker without writing project files or queuing routine messages to primary.
+- [x] Cut over only this user's old bridge after acceptance; preserve its baseline/processed receipts and rollback command.
+- [x] Verify service shutdown/restart and plugin/MCP installed in a new session; record exact local platform evidence and limits.
+- [x] Commit clean delivery and provide source/install/validation paths. No public publication claim.

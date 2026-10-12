@@ -12,4 +12,6 @@ Changing primary binding requires service restart. Changing bot/application/prof
 
 Service upgrade: stop this instance, preserve its data directory, install the new package, start and inspect status. Keep the previous package/config for rollback. Database schema v0.1 has no destructive automatic migration. Runtime DB/config/log files must never be added to a release. No automatic log rotation/retention scheduler is included in v0.1; use the host's retention/rotation tooling.
 
+Plugin upgrade: regenerate `dist/plugin` with `python scripts/package_plugin.py`, then remove/add only `feishu-agent-bridge@feishu-agent-bridge-local` through native Codex plugin commands and refresh the host. The generated stage is exclusively packaging output. Do not change the marketplace source to the repository root: native installation copies the selected directory, including ignored private files if they are present.
+
 Model work consumes the user's configured Codex access. Hourly job and per-group send budgets retain backlog instead of launching unbounded inference. Large messages are processed in complete chunks; normal reading lag may increase under load. This local service cannot infer while the computer is powered off/asleep.

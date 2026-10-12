@@ -34,10 +34,12 @@ feishu-agent status
 默认从启用时刻开始阅读；通过 `--since-ms` 指定回溯起点。配置文件默认位于 `~/.config/feishu-agent-bridge/config.json`，消息数据库位于 `~/.local/state/feishu-agent-bridge/<profile>/`。配置可增加多个群，所有访问仅限配置群。
 
 ```sh
+python scripts/package_plugin.py
 codex plugin marketplace add /absolute/path/to/feishu-agent-bridge
+codex plugin add feishu-agent-bridge@feishu-agent-bridge-local
 ```
 
-刷新或重启桌面应用，在本地插件来源中安装 Feishu Agent Bridge。Python 包须先安装且 `feishu-agent` 在宿主 PATH 中；插件本身不会自动安装常驻服务，也不依赖生命周期 hooks。自定义配置路径时，MCP 参数设置为 `["--config", "/absolute/path/to/config.json", "mcp"]`。
+安装后刷新或重启桌面应用。市场只复制生成的 `dist/plugin`，不会带入虚拟环境、Git 历史和私有运行记录。Python 包须先安装且 `feishu-agent` 在宿主 PATH 中；插件本身不会自动安装常驻服务，也不依赖生命周期 hooks。自定义配置路径时，MCP 参数设置为 `["--config", "/absolute/path/to/config.json", "mcp"]`。
 
 ## 开发主对话如何处理待办
 
@@ -63,9 +65,9 @@ feishu-agent start
 
 ## 运行与恢复
 
-`run` 前台运行，`start` 启动用户常驻服务，`stop` 仅停止本实例，`doctor` 检查能力，`summaries` 查看群摘要。电脑休眠期间不推理，恢复后补读历史。Windows 用户服务留到后续版本。
+`run` 前台运行，`start` 启动用户常驻服务，`stop` 仅停止本实例，`doctor` 检查能力，`summaries` 查看群摘要。电脑休眠期间不推理，恢复后补读历史。首版支持 macOS/Linux，暂不支持 Windows。
 
-“已采集、已阅读、已回复、已转交”分开保存。大消息按完整分片阅读，编辑版本重新阅读；附件只保存元数据，不假装已检查内容。网络超时导致发送结果不明确时保留 `uncertain`，不盲目重发。已知失败可修复原因后执行 `retry REPLY_ID`。
+“已采集、已阅读、已回复、已转交”分开保存。大消息按完整分片阅读，已发现的编辑版本重新阅读。历史按创建时间扫描并重叠 60 秒，超出窗口的旧消息编辑不保证发现。附件只保存元数据，不假装已检查内容。网络超时导致发送结果不明确时保留 `uncertain`，不盲目重发。已知失败可修复原因后执行 `retry REPLY_ID`。
 
 所有消息和日志默认仅保留在本机；需要定期按自己的数据保留规则备份/清理。当前版本尚未提供自动保留期限清理。源码不包含个人账户、群信息、凭据或本地运行数据。
 

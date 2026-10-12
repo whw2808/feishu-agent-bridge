@@ -16,12 +16,16 @@ start=time.monotonic()
 suite=unittest.defaultTestLoader.discover(str(ROOT/'tests'),top_level_dir=str(ROOT))
 result=unittest.TextTestRunner(verbosity=1).run(suite)
 lint=subprocess.run([sys.executable,'-m','ruff','check','src','tests','scripts'],capture_output=True,text=True,timeout=30)
+try:
+    head=subprocess.check_output(['git','rev-parse','HEAD'],text=True,stderr=subprocess.DEVNULL).strip()
+    dirty=bool(subprocess.check_output(['git','status','--porcelain'],text=True,stderr=subprocess.DEVNULL))
+except (OSError,subprocess.CalledProcessError):
+    head,dirty=None,None  # A source archive has no Git provenance; never invent a clean head.
 report={'successful':result.wasSuccessful() and lint.returncode==0,'tests':result.testsRun,
         'failures':len(result.failures),'errors':len(result.errors),'skipped':len(result.skipped),
         'lint_exit':lint.returncode,'lint_output':lint.stdout+lint.stderr,'python':sys.version,
         'platform':platform.platform(),'duration_seconds':time.monotonic()-start,
-        'head':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
-        'dirty':bool(subprocess.check_output(['git','status','--porcelain'],text=True)),
+        'head':head,'dirty':dirty,
         'details':[(str(t),detail) for t,detail in result.failures+result.errors]}
 (ROOT/'.artifacts').mkdir(exist_ok=True)
 (ROOT/'.artifacts'/'check-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')

@@ -48,13 +48,15 @@ The process is foreground with `feishu-agent run`, or a user service with `start
 
 ## Install the Codex plugin
 
-Install the Python package first so `feishu-agent` is available on the host's PATH. Add this repository as a local marketplace:
+Install the Python package first so `feishu-agent` is available on the host's PATH. From the repository, generate a clean plugin stage and add the local marketplace:
 
 ```sh
+python scripts/package_plugin.py
 codex plugin marketplace add /absolute/path/to/feishu-agent-bridge
+codex plugin add feishu-agent-bridge@feishu-agent-bridge-local
 ```
 
-Refresh/restart the desktop app and install **Feishu Agent Bridge** from the local marketplace. The plugin's root `plugin.json`, `mcp.json` and `skills/` follow the portable Agent Plugins layout. It does not depend on lifecycle hooks. You can also register `feishu-agent mcp` as a local stdio MCP server directly.
+Refresh/restart the desktop app after installation. The marketplace copies only `dist/plugin`, which excludes the virtual environment, Git history and private runtime evidence. The plugin's `plugin.json`, `mcp.json` and `skills/` follow the portable Agent Plugins layout. It does not depend on lifecycle hooks. You can also register `feishu-agent mcp` as a local stdio MCP server directly.
 
 With a custom config location, set the MCP server's args to `["--config", "/absolute/path/to/config.json", "mcp"]`. The daemon must be started separately; plugin installation is not a service installer. Public plugin-directory submission is a separate workflow with remote HTTPS MCP/hook restrictions; see [OpenAI packaging docs](https://developers.openai.com/plugins/build/plugins).
 
@@ -88,11 +90,11 @@ This uses native `codex queue`; it never interrupts/steers the active primary tu
 
 ## Reliability and configuration
 
-See [architecture](docs/architecture.md) and [operations](docs/operations.md). The service records collection/read/outbox/task states separately. Message edits remain pending until their new version is read. Long content is read in complete bounded chunks. Attachments retain metadata; their contents are not automatically downloaded or claimed inspected. Unsupported message types remain visible as unsupported.
+See [architecture](docs/architecture.md) and [operations](docs/operations.md). The service records collection/read/outbox/task states separately. Observed message edits remain pending until their new version is read. History is scanned by creation time with a 60-second overlap; edits to older messages outside that window are not guaranteed to be discovered. Long content is read in complete bounded chunks. Attachments retain metadata; their contents are not automatically downloaded or claimed inspected. Unsupported message types remain visible as unsupported. This version supports macOS/Linux; Windows is not supported.
 
 External writes can have ambiguous acceptance. Interrupted/timeout writes become `uncertain` and are **not automatically resent**. Known `failed` replies may be explicitly retried with `feishu-agent retry REPLY_ID` after resolving their cause. This is idempotent local processing, not a promise of exactly-once delivery over a network.
 
-Defaults: history 30s, ordinary reading 60s, receipt 10s, model timeout 120s, model jobs 60/hour, message batch 16000 characters, sends 6/minute/group, replies 4/topic. These are configurable. A slow/failed model does not stop the collector. Status exposes lag/errors and pending work; budgets retain messages for later processing.
+Defaults: history 30s, ordinary reading 60s, receipt 10s, model timeout 120s, model jobs 60/hour, message batch 16000 characters, sends 6/minute/group, replies 4/topic. These are configurable. A slow/failed model does not stop the collector. Status exposes message/reply counts, errors and pending work; budgets retain messages for later processing.
 
 ## Develop and validate
 

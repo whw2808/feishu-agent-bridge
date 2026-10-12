@@ -1,5 +1,5 @@
 {
   "name": "feishu-agent-bridge-local",
   "interface": {"displayName": "Feishu collaboration"},
-  "plugins": [{"name": "feishu-agent-bridge", "source": {"source": "local", "path": "./"}, "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}, "category": "Productivity"}]
+  "plugins": [{"name": "feishu-agent-bridge", "source": {"source": "local", "path": "./dist/plugin"}, "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}, "category": "Productivity"}]
 }

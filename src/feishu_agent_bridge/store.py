@@ -50,6 +50,8 @@ class Store:
               version INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS bot_ids(chat_id TEXT NOT NULL,app_id TEXT NOT NULL,
               open_id TEXT NOT NULL,PRIMARY KEY(chat_id,app_id),UNIQUE(chat_id,open_id));
+            CREATE TABLE IF NOT EXISTS parent_refs(message_id TEXT PRIMARY KEY,
+              chat_id TEXT NOT NULL,own INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS messages_pending ON messages(chat_id,read_state,addressed,created_ms);
             CREATE TABLE IF NOT EXISTS model_runs(started_ms INTEGER NOT NULL);
         ''')
@@ -101,7 +103,7 @@ class Store:
         if old and (old['chat_id'] != group.chat_id or old['sender_id'] != sender or old['update_ms'] >= updated):
             return False
         parent = event.get('reply_to') or event.get('parent_id')
-        parent_row = self.get_message(parent) if parent else None
+        parent_row = self.get_parent(parent) if parent else None
         addressed = any(isinstance(m,dict) and (m.get('id') == self.config.bot_open_id or
                         (isinstance(m.get('id'),dict) and m['id'].get('open_id') == self.config.bot_open_id))
                         for m in mentions) or bool(parent_row and parent_row['own'] and parent_row['chat_id']==group.chat_id)
@@ -135,6 +137,37 @@ class Store:
                 self.db.execute("UPDATE messages SET read_state='pending' WHERE parent_id=? AND chat_id=? AND read_state='awaiting_parent'",
                                 (mid,group.chat_id))
         return True
+
+    def get_parent(self,mid):
+        message = self.get_message(mid)
+        if message:
+            return message
+        row = self.db.execute('SELECT * FROM parent_refs WHERE message_id=?',(mid,)).fetchone()
+        return dict(row) if row else None
+
+    def remember_parent(self,event):
+        """Retain only verified parent identity, even outside the content-read window."""
+        mid,chat,sender = event.get('message_id'),event.get('chat_id'),event.get('sender_id')
+        if (not self.config.group(chat) or not isinstance(mid,str) or not re.fullmatch(r'om_[A-Za-z0-9_-]+',mid)
+            or not isinstance(sender,str) or not sender or event.get('sender_type') not in ('user','bot')
+            or event.get('deleted')):
+            raise ValueError('invalid verified parent identity')
+        sender = self.canonical_sender(chat,sender) if event['sender_type']=='bot' else sender
+        own = int(sender in (self.config.bot_open_id,self.config.bot_app_id))
+        known = self.get_parent(mid)
+        if known and (known['chat_id']!=chat or known['own']!=own):
+            raise ValueError('parent identity conflict')
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO parent_refs VALUES (?,?,?)',(mid,chat,own))
+            self.db.execute("UPDATE messages SET read_state=CASE WHEN kind IN "
+                            "('text','post','image','file','audio','video','media','system') THEN 'pending' ELSE 'unsupported' END,"
+                            "addressed=MAX(addressed,?),ack_due_ms=CASE WHEN ? THEN ? ELSE ack_due_ms END "
+                            "WHERE parent_id=? AND chat_id=? AND read_state='awaiting_parent'",
+                            (own,own,now_ms()+int(self.config.ack_seconds*1000),mid,chat))
+
+    def unresolved_parents(self,chat_id,limit=50):
+        return [dict(r) for r in self.db.execute("SELECT * FROM messages WHERE chat_id=? "
+                 "AND read_state='awaiting_parent' ORDER BY received_ms,message_id LIMIT ?",(chat_id,limit))]
 
     def canonical_sender(self,chat_id,identity):
         row = self.db.execute('SELECT app_id FROM bot_ids WHERE chat_id=? AND open_id=?',(chat_id,identity)).fetchone()

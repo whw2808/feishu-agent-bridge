@@ -34,6 +34,14 @@ class Collector:
                     normalized['chat_id'] = group.chat_id
                 self.store.ingest(normalized)
                 await self.resolve_parent(normalized)
+            # A failed original lookup must not be stranded behind a completed creation-time cursor.
+            for child in self.store.unresolved_parents(group.chat_id):
+                parent = child['parent_id']
+                retry_key = 'parent:retry:'+parent
+                if int(self.store.meta(retry_key,'0')) <= now_ms():
+                    self.store.set_meta(retry_key,now_ms()+5000)
+                    await self.resolve_parent({'chat_id':group.chat_id,'reply_to':parent})
+                    break  # Bound original lookups per history page.
             if data.get('has_more'):
                 scan['page_token'] = data.get('page_token')
                 if not scan['page_token']:
@@ -53,13 +61,18 @@ class Collector:
     async def resolve_parent(self,event):
         parent = event.get('reply_to') or event.get('parent_id')
         chat = event.get('chat_id')
-        if not parent or self.store.get_message(parent) or not self.store.config.group(chat):
+        if not parent or self.store.get_parent(parent) or not self.store.config.group(chat):
             return
         if not hasattr(self.transport,'original'):
             return
         try:
             original = await self.transport.original(parent,chat)
-            self.store.ingest(normalize_history(original))
+            normalized = normalize_history(original)
+            if normalized['message_id']!=parent or normalized['chat_id']!=chat or normalized['deleted']:
+                raise ValueError('parent original mismatch')
+            self.store.ingest(normalized)
+            self.store.remember_parent(normalized)
+            self.store.set_meta('health:parent:'+str(parent),'ok')
         except Exception as exc:
             self.store.set_meta('health:parent:'+str(parent),str(exc)[:800])
 

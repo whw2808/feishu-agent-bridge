@@ -4,8 +4,10 @@
 
 Collection is separate from inference. Only the service singleton recovers interrupted jobs; CLI/MCP readers do not reset live jobs. History cursors advance only after complete pagination. Scope/identity checks happen at ingestion, inference action validation and original-message readback before send. Versions prevent an edit arriving during inference from being marked read by an older result.
 
+Replies with an unknown parent wait for a scoped original-message lookup. For a parent older than activation, only its ID, group and own-bot flag are retained, so current ordinary replies can be read without importing historical content. Failed lookups are retried independently of the completed history cursor, bounded to one retry per page. Parents from a different group or mismatched message ID never classify a child.
+
 Model actions cannot choose a different group, source message or arbitrary recipient. Unknown actions are suppressed and visible in health. Ordinary messages are observed without replies. Closed conversations and per-topic/rate/repeated-content limits stop common bot loops. The primary session is optional and explicitly bound; only handoffs enter its native queue.
 
-SQLite states: message `pending -> reading -> read`, with partial chunks returning to pending; self/unsupported messages are separate. Replies `pending -> sending -> sent/failed/uncertain/blocked`. Inbox `pending -> claimed -> done`; native handoff delivery is independent of work completion. External uncertain acceptance needs operator reconciliation.
+SQLite states: message `awaiting_parent -> pending -> reading -> read`, with partial chunks returning to pending; self/unsupported messages are separate. Replies `pending -> sending -> sent/failed/uncertain/blocked`. Inbox `pending -> claimed -> done`; source edits supersede unfinished older tasks, and native handoff delivery is independent of work completion. External uncertain acceptance needs operator reconciliation.
 
 Local runtime configuration has no plugin/MCP/shell tools and references existing Codex authentication through a private runtime directory. Small explicit README/AGENTS snippets and the configured project brief supply project context; no primary transcript is copied. The background agent cannot perform project changes or direct group sends.
