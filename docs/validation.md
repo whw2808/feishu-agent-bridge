@@ -26,11 +26,26 @@ The wheel installs into a clean environment and its CLI starts. The source archi
 
 Portable plugin/MCP manifests were checked against the published Agent Plugins schemas. Both skills pass the skill validator. The local plugin is installed through the native Codex marketplace/add commands. Its cache contains exactly the ten staged distribution files. A fresh MCP client listed six tools and read the running service's status, including the two completed ordinary reads. The Python runtime is installed separately; plugin installation does not itself install or start a daemon.
 
+## Public GitHub validation
+
+The repository and [v0.1.0 release](https://github.com/whw2808/feishu-agent-bridge/releases/tag/v0.1.0) were published under `whw2808` on 2026-10-12. The release tag resolves to source `8744f795a43566bab29371ec478863d6bd294c50`; the uploaded wheel, source archive and plugin ZIP match their local SHA256SUMS. Personal runtime data and credentials were excluded from both Git history and release assets.
+
+[GitHub Actions run 38223503891](https://github.com/whw2808/feishu-agent-bridge/actions/runs/38223503891) passed on that exact source. All four downloaded structured reports record a clean checkout, 50 tests, zero failures/errors/skips and Ruff exit 0. Wheel/source builds also passed in each job.
+
+| Runner | Python | Tests |
+|---|---|---|
+| Ubuntu | 3.11.17 | 50 passed |
+| Ubuntu | 3.13.16 | 50 passed |
+| macOS | 3.11.9 | 50 passed |
+| macOS | 3.13.15 | 50 passed |
+
+This publication record follows the local validation snapshot retained in the v0.1.0 archives. Offline CI validates code and packaging; real Feishu/model acceptance remains the separately recorded local check.
+
 ## Limits
 
-- The GitHub workflow is configured for Ubuntu/macOS with Python 3.11/3.13. It has not run on GitHub for this new local repository; local macOS success is not Linux or those Python versions' evidence.
+- GitHub CI covers Ubuntu/macOS with Python 3.11/3.13 as recorded above. Real Feishu/model operation and service lifecycle were tested locally on macOS; the Linux systemd service was not exercised live.
 - This release supports macOS/Linux and Codex 0.162.x. Windows and other agent hosts are not validated or supported yet.
 - All new messages since the configured activation/backfill boundary are collected and queued for reading. A creation-time scan with a 60-second overlap does not guarantee discovery of edits to older messages outside that window. Attachments are metadata only.
 - The model cannot write project files or send directly. Deterministic guards reject known unverified completion-claim patterns; they are conservative checks, not a proof of arbitrary natural-language truth. Primary owners must report verified results.
 - Network delivery is not promised exactly once. Ambiguous acceptance remains `uncertain` for manual reconciliation. Rate/model budgets can increase backlog; sleeping/offline machines cannot infer until resumed.
-- Automatic data-retention cleanup, hosted operation, public PyPI publication and public plugin-directory submission are outside this local release.
+- Automatic data-retention cleanup, hosted operation, public PyPI publication and public plugin-directory submission are outside this release.

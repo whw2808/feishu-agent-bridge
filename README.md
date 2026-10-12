@@ -13,9 +13,11 @@ The original mention-to-primary-session prototype is not used for routine messag
 
 ## Install from source
 
-Requires Python 3.11+, Codex CLI 0.162.x, an authenticated lark-cli profile and a Feishu application bot in the selected groups. This repository is release-ready source; no PyPI or public plugin-directory publication is implied.
+Requires Python 3.11+, Codex CLI 0.162.x, an authenticated lark-cli profile and a Feishu application bot in the selected groups. Source and installation packages are available through [GitHub Releases](https://github.com/whw2808/feishu-agent-bridge/releases). The package is not published on PyPI or a public plugin directory.
 
 ```sh
+git clone https://github.com/whw2808/feishu-agent-bridge.git
+cd feishu-agent-bridge
 python3 -m venv .venv
 .venv/bin/python -m pip install '.[agent,mcp]'
 # Activate the environment so feishu-agent is discoverable by the plugin host:

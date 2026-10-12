@@ -12,9 +12,11 @@
 
 ## 安装与接入
 
-需要 Python 3.11+、Codex CLI 0.162.x、已登录的 lark-cli profile，以及加入目标群的飞书应用机器人。当前提供源码与本地插件分发，不表示已经发布 PyPI 或上架官方目录。
+需要 Python 3.11+、Codex CLI 0.162.x、已登录的 lark-cli profile，以及加入目标群的飞书应用机器人。源码和安装包通过 [GitHub Releases](https://github.com/whw2808/feishu-agent-bridge/releases) 分发，尚未发布 PyPI 或上架官方插件目录。
 
 ```sh
+git clone https://github.com/whw2808/feishu-agent-bridge.git
+cd feishu-agent-bridge
 python3 -m venv .venv
 .venv/bin/python -m pip install '.[agent,mcp]'
 source .venv/bin/activate
