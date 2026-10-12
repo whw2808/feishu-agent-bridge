@@ -60,7 +60,10 @@ class Lark:
         try:
             stdout,stderr = await asyncio.wait_for(proc.communicate(),20)
         except (asyncio.TimeoutError,asyncio.CancelledError) as exc:
-            await terminate(proc)
+            try:
+                await terminate(proc)
+            except TransportError:
+                pass  # Cleanup cannot turn ambiguous write acceptance into a known rejection.
             if isinstance(exc,asyncio.CancelledError):
                 raise
             raise TransportError('CLI operation timed out; acceptance unknown' if write else 'CLI read timed out',uncertain=write) from exc
@@ -68,9 +71,14 @@ class Lark:
             result = json.loads(stdout)
         except (ValueError,UnicodeDecodeError) as exc:
             raise TransportError('CLI returned invalid JSON',uncertain=write) from exc
+        accepted = isinstance(result,dict) and result.get('ok') and isinstance(result.get('data'),dict) and result['data'].get('message_id')
         if proc.returncode or not isinstance(result,dict) or not result.get('ok'):
+            if write and accepted:
+                return result['data']
             error = result.get('error',{}) if isinstance(result,dict) else {}
-            raise TransportError('CLI API failure: '+str(error.get('type','unknown'))+'/'+str(error.get('subtype',error.get('code','unknown'))),uncertain=False)
+            rejected = (error.get('type') in ('auth','validation') or error.get('subtype') in
+                        ('missing_scope','missing_scopes','invalid_params','permission_denied','missing_token'))
+            raise TransportError('CLI API failure: '+str(error.get('type','unknown'))+'/'+str(error.get('subtype',error.get('code','unknown'))),uncertain=write and not rejected)
         return result.get('data',{})
 
     async def history(self,group,scan):
@@ -88,21 +96,29 @@ class Lark:
             raise TransportError('original message is unavailable or outside configured group')
         return items[0]
 
+    async def members(self,chat_id):
+        return await self.call(['im','+chat-members-list','--chat-id',chat_id,'--member-types','bot','--as','user'])
+
     async def reply(self,mid,body,mentions,key,*,chat_id):
         original = await self.original(mid,chat_id)
         sender = original.get('sender',{})
         allowed = {sender.get('id')}
+        bot_open_id = None
+        if sender.get('sender_type')=='app' or str(sender.get('id','')).startswith('cli_'):
+            members = await self.members(chat_id)
+            matches = [bot for bot in members.get('bots',[]) if bot.get('app_id')==sender.get('id')]
+            if len(matches)!=1:
+                raise TransportError('cannot uniquely resolve original bot in configured group')
+            bot_open_id = matches[0].get('member_id','')
+            if not re.fullmatch(r'ou_[A-Za-z0-9_-]+',bot_open_id):
+                raise TransportError('invalid original bot member ID')
+            allowed.add(bot_open_id)
         if any(m not in allowed for m in mentions):
             raise TransportError('reply mentions must identify original sender')
         prefix = ''
         for identity in mentions:
             if identity.startswith('cli_'):
-                members = await self.call(['im','+chat-members-list','--chat-id',chat_id,
-                                           '--member-types','bot','--as','user'])
-                matches = [bot for bot in members.get('bots',[]) if bot.get('app_id') == identity]
-                if len(matches) != 1:
-                    raise TransportError('cannot uniquely resolve original bot in configured group')
-                identity = matches[0].get('member_id','')
+                identity = bot_open_id or ''
             if re.fullmatch(r'ou_[A-Za-z0-9_-]+',identity):
                 prefix += f'<at user_id="{identity}">sender</at> '
             else:
@@ -139,8 +155,9 @@ class Lark:
                         await received.put(event)
                     await proc.wait()
                 finally:
+                    reader.cancel()
+                    await asyncio.gather(reader,return_exceptions=True)
                     await terminate(proc)
-                    await reader
                 await received.put({'control':'disconnected','error':f'event consumer exited {proc.returncode}'})
             except asyncio.CancelledError:
                 if proc is not None:

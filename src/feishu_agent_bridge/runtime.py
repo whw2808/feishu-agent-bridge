@@ -32,7 +32,7 @@ async def handoff_loop(store,stop):
     while not stop.is_set():
         if store.config.auto_handoff:
             for task in store.tasks():
-                if task['delivery_state'] != 'pending' or task['state']!='pending':
+                if task['delivery_state'] != 'pending' or task['state']!='pending' or not store.task_is_current(task):
                     continue
                 with store.db:
                     store.db.execute("UPDATE tasks SET delivery_state='sending' WHERE id=? AND delivery_state='pending'",(task['id'],))

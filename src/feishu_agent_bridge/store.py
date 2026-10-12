@@ -35,7 +35,8 @@ class Store:
               content TEXT NOT NULL,kind TEXT NOT NULL,addressed INTEGER NOT NULL,own INTEGER NOT NULL,
               root_id TEXT,parent_id TEXT,payload TEXT NOT NULL,read_state TEXT NOT NULL,
               read_offset INTEGER NOT NULL DEFAULT 0,last_error TEXT,attempts INTEGER NOT NULL DEFAULT 0,
-              next_attempt_ms INTEGER NOT NULL DEFAULT 0,received_ms INTEGER NOT NULL,ack_due_ms INTEGER);
+              next_attempt_ms INTEGER NOT NULL DEFAULT 0,received_ms INTEGER NOT NULL,ack_due_ms INTEGER,
+              last_read_ms INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS versions(message_id TEXT NOT NULL,update_ms INTEGER NOT NULL,
               payload TEXT NOT NULL,PRIMARY KEY(message_id,update_ms));
             CREATE TABLE IF NOT EXISTS replies(id TEXT PRIMARY KEY,message_id TEXT NOT NULL,
@@ -45,10 +46,16 @@ class Store:
             CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,message_id TEXT NOT NULL,
               chat_id TEXT NOT NULL,title TEXT NOT NULL,detail TEXT NOT NULL,state TEXT NOT NULL,
               owner TEXT,result TEXT,created_ms INTEGER NOT NULL,
-              delivery_state TEXT NOT NULL DEFAULT 'pending',queue_id TEXT,last_error TEXT);
+              delivery_state TEXT NOT NULL DEFAULT 'pending',queue_id TEXT,last_error TEXT,
+              version INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS bot_ids(chat_id TEXT NOT NULL,app_id TEXT NOT NULL,
+              open_id TEXT NOT NULL,PRIMARY KEY(chat_id,app_id),UNIQUE(chat_id,open_id));
             CREATE INDEX IF NOT EXISTS messages_pending ON messages(chat_id,read_state,addressed,created_ms);
             CREATE TABLE IF NOT EXISTS model_runs(started_ms INTEGER NOT NULL);
         ''')
+        for table,column in (('messages','last_read_ms'),('tasks','version')):
+            if column not in {r[1] for r in self.db.execute('PRAGMA table_info('+table+')')}:
+                self.db.execute(f'ALTER TABLE {table} ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0')
         binding = json.dumps({k: getattr(config,k) for k in ('profile','bot_open_id','bot_app_id')}, sort_keys=True)
         if self.meta('binding') not in (None,binding):
             self.db.close()
@@ -86,21 +93,26 @@ class Store:
             updated = max(created,int(event.get('update_time') or created))
         except (KeyError,ValueError,TypeError):
             return False
-        if created < group.start_ms:
+        sender = self.canonical_sender(group.chat_id,sender) if event['sender_type']=='bot' else sender
+        own = sender in (self.config.bot_open_id,self.config.bot_app_id)
+        if created < group.start_ms and not own:
             return False
         old = self.get_message(mid)
         if old and (old['chat_id'] != group.chat_id or old['sender_id'] != sender or old['update_ms'] >= updated):
             return False
-        own = sender in (self.config.bot_open_id,self.config.bot_app_id)
         parent = event.get('reply_to') or event.get('parent_id')
         parent_row = self.get_message(parent) if parent else None
         addressed = any(isinstance(m,dict) and (m.get('id') == self.config.bot_open_id or
                         (isinstance(m.get('id'),dict) and m['id'].get('open_id') == self.config.bot_open_id))
-                        for m in mentions) or bool(parent_row and parent_row['own'])
+                        for m in mentions) or bool(parent_row and parent_row['own'] and parent_row['chat_id']==group.chat_id)
         kind = event.get('message_type','text')
         supported = kind in ('text','post','image','file','audio','video','media','system')
         payload = json.dumps(event,ensure_ascii=False)
         state = 'own' if own else 'pending' if supported else 'unsupported'
+        if event.get('deleted'):
+            state = 'deleted'
+        elif parent and not addressed and not own and (not parent_row or parent_row['chat_id']!=group.chat_id):
+            state = 'awaiting_parent'
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO versions VALUES (?,?,?)',(mid,updated,payload))
             self.db.execute('''INSERT INTO messages
@@ -109,21 +121,66 @@ class Store:
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO UPDATE SET
               update_ms=excluded.update_ms,content=excluded.content,payload=excluded.payload,
               kind=excluded.kind,addressed=excluded.addressed,read_state=excluded.read_state,
-              read_offset=0,last_error=NULL,attempts=0,next_attempt_ms=0,ack_due_ms=excluded.ack_due_ms''',
+              read_offset=0,last_error=NULL,attempts=0,next_attempt_ms=0,last_read_ms=0,ack_due_ms=excluded.ack_due_ms''',
               (mid,group.chat_id,sender,event['sender_type'],created,updated,event['content'],kind,
                int(addressed),int(own),event.get('root_id'),parent,payload,state,now_ms(),
                now_ms()+int(self.config.ack_seconds*1000) if addressed and not own else None))
+            if old:
+                self.db.execute("UPDATE tasks SET state='superseded' WHERE message_id=? AND version<>? AND state!='done'",(mid,updated))
+            if own:
+                self.db.execute("UPDATE messages SET addressed=1,read_state='pending',read_offset=0,ack_due_ms=? "
+                                "WHERE parent_id=? AND chat_id=? AND own=0 AND read_state NOT IN ('unsupported','deleted')",
+                                (now_ms()+int(self.config.ack_seconds*1000),mid,group.chat_id))
+            else:
+                self.db.execute("UPDATE messages SET read_state='pending' WHERE parent_id=? AND chat_id=? AND read_state='awaiting_parent'",
+                                (mid,group.chat_id))
         return True
+
+    def canonical_sender(self,chat_id,identity):
+        row = self.db.execute('SELECT app_id FROM bot_ids WHERE chat_id=? AND open_id=?',(chat_id,identity)).fetchone()
+        return row[0] if row else identity
+
+    def sender_aliases(self,source):
+        aliases = {source['sender_id']}
+        row = self.db.execute('SELECT app_id,open_id FROM bot_ids WHERE chat_id=? AND (app_id=? OR open_id=?)',
+                              (source['chat_id'],source['sender_id'],source['sender_id'])).fetchone()
+        if row:
+            aliases.update(row)
+        return aliases
+
+    def register_bots(self,chat_id,bots):
+        if not self.config.group(chat_id) or not isinstance(bots,list):
+            raise ValueError('bot mapping outside configured group')
+        app_ids,open_ids = set(),set()
+        for bot in bots:
+            app,openid = bot.get('app_id',''),bot.get('member_id','')
+            if not re.fullmatch(r'cli_[A-Za-z0-9_-]+',app) or not re.fullmatch(r'ou_[A-Za-z0-9_-]+',openid):
+                raise ValueError('invalid bot identity mapping')
+            if app in app_ids or openid in open_ids:
+                raise ValueError('ambiguous bot identity mapping')
+            app_ids.add(app)
+            open_ids.add(openid)
+        with self.db:
+            for bot in bots:
+                app,openid = bot['app_id'],bot['member_id']
+                known = self.db.execute('SELECT app_id,open_id FROM bot_ids WHERE chat_id=? AND (app_id=? OR open_id=?)',
+                                       (chat_id,app,openid)).fetchall()
+                if any(r['app_id']!=app or r['open_id']!=openid for r in known):
+                    raise ValueError('bot identity changed; explicit reconciliation required')
+                self.db.execute('INSERT OR IGNORE INTO bot_ids VALUES (?,?,?)',(chat_id,app,openid))
+                self.db.execute("UPDATE messages SET sender_id=? WHERE chat_id=? AND sender_type='bot' AND sender_id=?",
+                                (app,chat_id,openid))
 
     def get_message(self,mid):
         row = self.db.execute('SELECT * FROM messages WHERE message_id=?',(mid,)).fetchone()
         return dict(row) if row else None
 
-    def pending_messages(self,chat_id,limit=50,*,addressed_only=False):
+    def pending_messages(self,chat_id,limit=50,*,addressed_only=False,prioritize_mentions=True):
         if not self.config.group(chat_id):
             return []
         rows = self.db.execute("SELECT * FROM messages WHERE chat_id=? AND read_state='pending' AND next_attempt_ms<=? "
-             + ('AND addressed=1 ' if addressed_only else '')+'ORDER BY addressed DESC,created_ms,message_id LIMIT ?',
+             + ('AND addressed=1 ' if addressed_only else '')+'ORDER BY '+('addressed DESC,' if prioritize_mentions else '')+
+             'CASE WHEN last_read_ms=0 THEN received_ms ELSE last_read_ms END,created_ms,message_id LIMIT ?',
              (chat_id,now_ms(),limit)).fetchall()
         return [dict(r) for r in rows]
 
@@ -134,6 +191,8 @@ class Store:
                                 (now_ms()+int(self.config.ack_seconds*1000),mid))
 
     def mark_read(self,ids,*,versions=None,offsets=None):
+        served = max(now_ms(),int(self.meta('read_clock','0'))+1)
+        self.set_meta('read_clock',served)
         with self.db:
             for mid in ids:
                 current = self.get_message(mid)
@@ -141,7 +200,7 @@ class Store:
                     continue
                 offset = offsets[mid] if offsets is not None else len(current['content'])
                 state = 'read' if offset >= len(current['content']) else 'pending'
-                self.db.execute('UPDATE messages SET read_state=?,read_offset=?,ack_due_ms=NULL,last_error=NULL WHERE message_id=?',(state,offset,mid))
+                self.db.execute('UPDATE messages SET read_state=?,read_offset=?,ack_due_ms=NULL,last_error=NULL,last_read_ms=? WHERE message_id=?',(state,offset,served,mid))
 
     def reading_failed(self,ids,error):
         with self.db:
@@ -184,18 +243,26 @@ class Store:
             raise ValueError('task source outside configured scope')
         tid = stable_id(mid,source['update_ms'],'task')
         with self.db:
-            self.db.execute("INSERT OR IGNORE INTO tasks(id,message_id,chat_id,title,detail,state,created_ms) VALUES (?,?,?,?,?,'pending',?)",
-                            (tid,mid,source['chat_id'],title,detail,now_ms()))
+            self.db.execute("INSERT OR IGNORE INTO tasks(id,message_id,chat_id,title,detail,state,created_ms,version) VALUES (?,?,?,?,?,'pending',?,?)",
+                            (tid,mid,source['chat_id'],title,detail,now_ms(),source['update_ms']))
         return tid
 
     def tasks(self,*,include_done=False):
-        return [dict(r) for r in self.db.execute('SELECT * FROM tasks '+('' if include_done else "WHERE state!='done' ")+'ORDER BY created_ms')
+        return [dict(r) for r in self.db.execute('SELECT * FROM tasks '+('' if include_done else "WHERE state IN ('pending','claimed') ")+'ORDER BY created_ms')
                 if self.config.group(r['chat_id'])]
+
+    def task_is_current(self,task):
+        source = self.get_message(task['message_id'])
+        return bool(source and self.config.group(task['chat_id']) and source['update_ms']==task['version']
+                    and source['read_state']!='deleted' and task['state'] in ('pending','claimed'))
 
     def claim_task(self,tid,owner):
         if not isinstance(owner,str) or not owner.strip():
             raise ValueError('task owner required')
         with self.db:
+            task = self.db.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
+            if not task or not self.task_is_current(task):
+                return False
             return bool(self.db.execute("UPDATE tasks SET state='claimed',owner=? WHERE id=? AND state='pending'",(owner,tid)).rowcount)
 
     def complete_task(self,tid,owner,result):
@@ -203,12 +270,12 @@ class Store:
             raise ValueError('completion must be 1..6000 characters')
         with self.db:
             row = self.db.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
-            if not row or row['state'] != 'claimed' or row['owner'] != owner:
+            if not row or row['state'] != 'claimed' or row['owner'] != owner or not self.task_is_current(row):
                 return False
             if not self.config.group(row['chat_id']):
                 raise ValueError('task outside current configured scope')
             self.db.execute("UPDATE tasks SET state='done',result=? WHERE id=?",(result,tid))
-            self.enqueue_reply(row['message_id'],'completed',result,[])
+            self.enqueue_reply(row['message_id'],'completed',result,[],version=row['version'])
         return True
 
     def status(self):

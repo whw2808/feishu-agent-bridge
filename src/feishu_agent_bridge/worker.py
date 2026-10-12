@@ -1,7 +1,7 @@
 """Model work uses an independent thread and never blocks collection."""
 import asyncio
 import logging
-from feishu_agent_bridge.policy import closure,valid_action
+from feishu_agent_bridge.policy import closure,valid_action,unverified_work_claim
 from feishu_agent_bridge.store import now_ms
 
 LOG = logging.getLogger(__name__)
@@ -14,7 +14,8 @@ class Worker:
 
     async def tick(self,group,*,addressed_only=False):
         async with self.semaphore:
-            rows = self.store.pending_messages(group.chat_id,20,addressed_only=addressed_only)
+            rows = self.store.pending_messages(group.chat_id,20,addressed_only=addressed_only,
+                                                prioritize_mentions=addressed_only)
             if not rows:
                 return 0
             recent = self.store.db.execute('SELECT count(*) FROM model_runs WHERE started_ms>?',(now_ms()-3600000,)).fetchone()[0]
@@ -22,11 +23,12 @@ class Worker:
                 self.store.set_meta('health:model','hourly model-job budget reached; messages retained')
                 return 0
             chunks,remaining = [],self.store.config.max_batch_chars
+            share = max(256,self.store.config.max_batch_chars//len(rows))
             for row in rows:
                 if remaining <= 0:
                     break
                 start = row['read_offset']
-                part = row['content'][start:start+remaining]
+                part = row['content'][start:start+min(remaining,share)]
                 chunks.append({'message_id':row['message_id'],'version':row['update_ms'],
                                'content':part,'offset':start,'complete':start+len(part)>=len(row['content']),
                                'sender_type':row['sender_type'],'addressed':bool(row['addressed']),
@@ -53,6 +55,12 @@ class Worker:
                     chunk = next((c for c in chunks if c['message_id']==mid),None)
                     source = sources.get(mid)
                     current = self.store.get_message(mid) if source else None
+                    if (source and current['update_ms']==versions[mid] and source['addressed'] and chunk['complete']
+                        and not closure(source['content']) and isinstance(action.get('text'),str)
+                        and action.get('kind')=='reply' and unverified_work_claim(action['text'])):
+                        self.store.create_task(mid,'核验项目操作状态','请核验原消息所问的项目操作与验证结果。后台回复没有完成操作的可信证据，不能作为完成声明。')
+                        self.store.enqueue_reply(mid,'handoff','这条请求需要开发会话核验实际状态，已记录为待办；目前没有可确认的项目操作结果。',[])
+                        continue
                     if (not source or mid in used or current['update_ms']!=versions[mid]
                         or not valid_action(action,source,chunk)):
                         self.store.set_meta('health:decision','invalid, unaddressed, duplicate or stale action suppressed')

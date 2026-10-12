@@ -4,6 +4,7 @@ import json
 import re
 from feishu_agent_bridge.adapters.lark import TransportError
 from feishu_agent_bridge.store import now_ms
+from feishu_agent_bridge.policy import unverified_work_claim
 
 
 class Sender:
@@ -17,11 +18,18 @@ class Sender:
             return 'invalid or stale source'
         if reply['kind'] != 'completed' and not source['addressed']:
             return 'ordinary messages cannot generate unsolicited replies'
+        if reply['kind']=='completed':
+            task = self.store.db.execute("SELECT 1 FROM tasks WHERE message_id=? AND version=? AND state='done' AND result=?",
+                                        (source['message_id'],reply['version'],reply['body'])).fetchone()
+            if not task:
+                return 'completion has no trusted primary task provenance'
+        elif reply['kind']=='final' and unverified_work_claim(reply['body']):
+            return 'unverified project-operation claim'
         body = reply['body']
         if not isinstance(body,str) or not body.strip() or len(body)>6000 or re.search(r'<\s*at\b',body,re.I):
             return 'invalid reply body or injected mention'
         mentions = json.loads(reply['mentions'])
-        if not isinstance(mentions,list) or any(m != source['sender_id'] for m in mentions):
+        if not isinstance(mentions,list) or any(m not in self.store.sender_aliases(source) for m in mentions):
             return 'mention outside original sender'
         count = self.store.db.execute("SELECT count(*) FROM replies WHERE root_id=? AND state='sent'",
                                       (reply['root_id'],)).fetchone()[0]

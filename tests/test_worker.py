@@ -51,6 +51,8 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.store.tasks()),1)
         self.assertIn('待办',self.store.pending_replies()[0]['body'])
         self.assertNotIn('已经完成',self.store.pending_replies()[0]['body'])
+        from feishu_agent_bridge.delivery import Sender
+        self.assertEqual(await Sender(self.store,FakeLark([])).dispatch(),1)
 
     async def test_blocked_inference_does_not_block_history_collection_or_ack(self):
         started,release = asyncio.Event(),asyncio.Event()

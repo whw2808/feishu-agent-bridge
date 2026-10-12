@@ -22,6 +22,9 @@ class Collector:
         scan = json.loads(saved) if saved else self.new_scan(group)
         self.store.set_meta(key,json.dumps(scan))
         try:
+            if hasattr(self.transport,'members'):
+                members = await self.transport.members(group.chat_id)
+                self.store.register_bots(group.chat_id,members.get('bots',[]))
             data = await self.transport.history(group,scan)
             if not isinstance(data,dict) or not isinstance(data.get('items',[]),list):
                 raise ValueError('invalid history page')
@@ -30,6 +33,7 @@ class Collector:
                 if normalized.get('chat_id') is None:
                     normalized['chat_id'] = group.chat_id
                 self.store.ingest(normalized)
+                await self.resolve_parent(normalized)
             if data.get('has_more'):
                 scan['page_token'] = data.get('page_token')
                 if not scan['page_token']:
@@ -45,6 +49,19 @@ class Collector:
             self.store.set_meta(f'health:history:{group.chat_id}',str(exc)[:800])
             LOG.warning('history scan failed chat=%s error=%s',group.chat_id,exc)
             return False
+
+    async def resolve_parent(self,event):
+        parent = event.get('reply_to') or event.get('parent_id')
+        chat = event.get('chat_id')
+        if not parent or self.store.get_message(parent) or not self.store.config.group(chat):
+            return
+        if not hasattr(self.transport,'original'):
+            return
+        try:
+            original = await self.transport.original(parent,chat)
+            self.store.ingest(normalize_history(original))
+        except Exception as exc:
+            self.store.set_meta('health:parent:'+str(parent),str(exc)[:800])
 
     async def history_loop(self,stop):
         deadlines = {g.chat_id:0 for g in self.store.config.groups}
@@ -69,5 +86,14 @@ class Collector:
             if isinstance(event,dict) and event.get('control'):
                 self.store.set_meta('health:events',event.get('error') or event['control'])
             else:
+                if (isinstance(event,dict) and event.get('sender_type')=='bot' and
+                    self.store.config.group(event.get('chat_id')) and hasattr(self.transport,'members')):
+                    try:
+                        members = await self.transport.members(event['chat_id'])
+                        self.store.register_bots(event['chat_id'],members.get('bots',[]))
+                    except Exception as exc:
+                        self.store.set_meta('health:bot_identity',str(exc)[:800])
                 self.store.ingest(event)
+                if isinstance(event,dict):
+                    await self.resolve_parent(event)
             received.task_done()
